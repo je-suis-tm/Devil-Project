@@ -122,7 +122,7 @@ agegroup=c("y0","y1","y2","y3","y4","y5")
 # Population (simulation) model template for fixed parameters
 stage_matrix <- matrix(leslie_matrix, nrow = 6, ncol = 6, byrow = TRUE,
                        dimnames = list(agegroup,agegroup ))
-stage_matrix # examine
+#stage_matrix # examine
 model_template <- PopulationModel$new(region = region,
                                       time_steps = 7, # years
                                       populations = region$region_cells, 
@@ -196,7 +196,7 @@ capacity_gen$add_function_template("carrying_capacity",
                                      round(params$density_max*params$example_hs)
                                    },
                                    call_params = c("density_max", "example_hs"))
-capacity_gen$generate(input_values = list(initial_n = 15, density_max = 15)) # test
+#capacity_gen$generate(input_values = list(initial_n = 15, density_max = 15)) # test
 ```
 
 ##### Dispersal generator
@@ -223,7 +223,7 @@ dispersal_gen <- DispersalGenerator$new(region = region,
 dispersal_gen$calculate_distance_data() # pre-calculate
 test_dispersal <- dispersal_gen$generate(input_values = list(dispersal_p = 0.174693683, 
                                                              dispersal_b = 3308.05479))
-head(test_dispersal$dispersal_data[[1]])
+#head(test_dispersal$dispersal_data[[1]])
 ```
 
 ### Step 3: Sample model and generator parameters for each simulation
@@ -238,17 +238,16 @@ lhs_gen <- LatinHypercubeSampler$new()
 
 #logistic growth model 0.74
 # https://github.com/je-suis-tm/Devil-Project/blob/main/Chapter1/Maria/logistic%20population%20growth%20maria%20island.ipynb
-lhs_gen$set_uniform_parameter("growth_rate_max", lower = 0.5, upper = 0.8, decimals = 2)
+lhs_gen$set_uniform_parameter("growth_rate_max", lower = 0.5, upper = 0.9, decimals = 2)
 lhs_gen$set_uniform_parameter("initial_n", lower = 10, upper = 30, decimals = 0)
 
-
-#TODO
-#a small max density is causing many NA errors
 lhs_gen$set_uniform_parameter("density_max", lower = 5, upper = 15, decimals = 0)
 lhs_gen$set_uniform_parameter("dispersal_p", lower = 0.09, upper = 0.3, decimals = 4)
 lhs_gen$set_uniform_parameter("dispersal_b", lower = 1000, upper = 7000, decimals = 2)
-sample_data <- lhs_gen$generate_samples(number = 20)
-sample_data # examine
+sample_data <- lhs_gen$generate_samples(number = 10000)
+
+#save as pickle
+save(sample_data, file="sample data.Rda")
 ```
 
 ### Step 4: Build a simulation manager to run each simulation
@@ -264,10 +263,10 @@ sim_manager <- SimulationManager$new(sample_data = sample_data,
                                      generators = list(capacity_gen, dispersal_gen),
                                      parallel_cores = 2,
                                      results_dir = OUTPUT_DIR)
-run_output <- sim_manager$run()
+run_output <- sim_manager$run(results_dir = tempdir())
 run_output$summary
-dir(OUTPUT_DIR, "*.RData") # includes result files 
-dir(OUTPUT_DIR, "*.txt") # plus simulation log
+#dir(OUTPUT_DIR, "*.RData") # includes result files 
+#dir(OUTPUT_DIR, "*.txt") # plus simulation log
 ```
 
 Note that the output directory contains a R-data result files for each sample simulation
@@ -289,23 +288,39 @@ validate) these result metrics to (with) known or desired target patterns (in st
 ```{r}
 results_manager <- ResultsManager$new(simulation_manager = sim_manager,
                                       simulation_results = PopulationResults$new(),
-                                      summary_metrics = c("trend_n"),
+                                      summary_metrics = c("p2","p3","p4","p5","p6","p7"),
                                       summary_matrices = c("n"),
                                       summary_functions = list(
-                                        trend_n = function(results) {
-                                          round(results$all$abundance_trend, 2)
+                                        p2 = function(results) {
+                                          results$all$abundance[2]
+                                        },
+                                        p3 = function(results) {
+                                          results$all$abundance[3]
+                                        },
+                                        p4 = function(results) {
+                                          results$all$abundance[4]
+                                        },
+                                        p5 = function(results) {
+                                          results$all$abundance[5]
+                                        },
+                                        p6 = function(results) {
+                                          results$all$abundance[6]
+                                        },
+                                        p7 = function(results) {
+                                          results$all$abundance[7]
                                         },
                                         n = "all$abundance"),
                                       parallel_cores = 2)
 gen_output <- results_manager$generate()
 gen_output$summary
-dir(OUTPUT_DIR, "*.txt") # plus generation log
-results_manager$summary_metric_data
-results_manager$summary_matrix_list
+#dir(OUTPUT_DIR, "*.txt") # plus generation log
+# results_manager$summary_metric_data
+# results_manager$summary_matrix_list
 ```
 
 ```{r}
-readRDS('sample_2_results.RData')
+#save as pickle
+save(results_manager, file="models.Rda")
 ```
 
 ### Step 6: Build a validator to select a model ensemble
@@ -323,20 +338,60 @@ relatively trivial, having the aim of producing stable population abundances wit
 harvest. However, the package facilitates the use more complex spatio-temporal metrics 
 and targets (demonstrated in more advanced vignettes).
 
+[15, 14, 27, 99, 92, 96, 103]
+
+```{r}
+#load pickle files so no need to retrain
+load("models.Rda")
+load("sample data.Rda")
+```
+
+```{r}
+#showna
+validation_target=results_manager$summary_metric_data
+validation_target[!complete.cases(validation_target),]
+```
+
+```{r}
+#list of na
+remove_index=which(!complete.cases(validation_target))
+```
+
 ```{r}
 # Create a validator for selecting the 'best' example models
-
-validation_target=as.matrix(c(trend_n=20))
-
-
-validator <- Validator$new(simulation_parameters = sample_data,
+if (length(remove_index)==0)    {
+    validator <- Validator$new(simulation_parameters = sample_data,
                            simulation_summary_metrics =
-                             results_manager$summary_metric_data[-1],
-                           observed_metric_targets = validation_target,
+                             validation_target[-1],
+                           observed_metric_targets = c(p2=14,p3=27,p4=99,p5=92,p6=96,p7=103),
                            output_dir = OUTPUT_DIR)
-suppressWarnings(validator$run(tolerance = 0.25, output_diagnostics = TRUE))
+
+} else    {
+    validator <- Validator$new(simulation_parameters = sample_data[-remove_index,],
+                           simulation_summary_metrics =
+                             validation_target[-remove_index,][-1],
+                           observed_metric_targets = c(p2=14,p3=27,p4=99,p5=92,p6=96,p7=103),
+                           output_dir = OUTPUT_DIR)
+}
+```
+
+```{r}
+validator$run(tolerance = 0.25, output_diagnostics = TRUE)
+```
+
+```{r}
+#rescale weights as they dont sum up to one
+weights=validator$selected_simulations 
+weights$weight=weights$weight/sum(weights$weight)
+```
+
+```{r}
+#get result
+colSums(sample_data[weights$index,][-1]*replicate(length(sample_data), weights$weight))
+```
+
+```{r}
 dir(OUTPUT_DIR, "*.pdf") # plus validation diagnostics (see abc library documentation)
-validator$selected_simulations # top 3 models (stable abundance and high harvest)
 ```
 
 We encourage the user to examine the generated diagnostics (PDF) output file, and to
@@ -345,17 +400,15 @@ documentation). As our simple example only uses two metrics/targets, we can visu
 the congruence of the selected models with the targets via a simple plot.
 
 ```{r}
-# Plot the simulation, targets, and selected metrics
-graphics::plot(x = results_manager$summary_metric_data$total_h,
-               y = results_manager$summary_metric_data$trend_n,
-               main = "Example model validation",
-               xlab = "Total harvested", ylab = "Abundance trend")
-graphics::points(x = 600, y = 0, col = "red", pch = 4)
-selected_indices <- validator$selected_simulations$index
-graphics::points(x = results_manager$summary_metric_data$total_h[selected_indices],
-                 y = results_manager$summary_metric_data$trend_n[selected_indices],
-                 col = "blue", pch = 3)
-graphics::legend("bottomleft", legend = c("Summary metrics", "Targets", "Selected"),
-                 col = c(1, "red", "blue"), pch = c(1, 4, 3), cex = 0.8)
+# install.packages('rmarkdown')
+
+# library(rmarkdown)
+
+# setwd("C:/Users/tm/Downloads/")
+
+# input <- "poems maria.ipynb"
+
+# # First convert to .Rmd...
+# convert_ipynb(input)
 ```
 
